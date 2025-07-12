@@ -1,0 +1,476 @@
+# Dockerfile for building Raspberry Pi OS (64-bit) Lite - Debian Bookworm (Tiny Version)
+# 
+# Core principles:
+# 1. Complete alignment - Consistent with pi-gen stage0 -> stage1 -> stage2 -> export-image flow
+# 2. Minimal adaptation - Only adjust operations that absolutely cannot be executed in Docker environment
+# 3. Hardware removal - Remove all hardware-specific components not usable in Docker containers
+#
+# Comment format specification:
+# # Stage/subdirectory: Operation description (from script name)
+# # Container adaptation: Brief explanation of differences
+# # (pi-gen uses: original approach, container: container approach)
+
+FROM arm64v8/debian:bookworm AS builder
+
+# Build Configuration - Corresponds to pi-gen configuration variables
+ARG TIMEZONE_DEFAULT="Europe/London"
+ARG FIRST_USER_NAME="pi"
+ARG FIRST_USER_PASS="raspberry"
+ARG LOCALE_DEFAULT="en_GB.UTF-8"
+ARG KEYBOARD_KEYMAP="British English"
+ARG KEYBOARD_LAYOUT="English (UK)"
+ARG TARGET_HOSTNAME="raspberrypi"
+ARG ENABLE_SSH=1
+ARG WPA_COUNTRY="GB"
+
+# SSH Security Configuration
+ARG PUBKEY_SSH_FIRST_USER=""
+ARG PUBKEY_ONLY_SSH=0
+
+# APT Configuration
+ARG APT_PROXY=""
+ARG TEMP_REPO=""
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    debootstrap \
+    binfmt-support \
+    curl \
+    gpg \
+    ca-certificates \
+    rsync \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up work directory
+WORKDIR /build
+
+# Import GPG keys
+# Container adaptation: Download from internet instead of using local files/raspberrypi.gpg.key
+# (pi-gen uses: cat files/raspberrypi.gpg.key | gpg --dearmor, container: curl download)
+RUN curl -s https://archive.raspberrypi.com/debian/raspberrypi.gpg.key | gpg --dearmor > raspberrypi-archive-stable.gpg && \
+    curl -s https://ftp-master.debian.org/keys/archive-key-12.asc | gpg --dearmor > debian-archive-keyring.gpg
+
+# =============================================================================
+# Stage 0: Base System (pi-gen/stage0)
+# =============================================================================
+
+# Stage0/prerun.sh: Bootstrap rootfs with debootstrap
+# Container adaptation: Use downloaded keyring instead of host system keyring
+# (pi-gen uses: system keyring, container: manually downloaded keyring)
+RUN debootstrap \
+    --arch=arm64 \
+    --keyring=/build/debian-archive-keyring.gpg \
+    --components=main,contrib,non-free,non-free-firmware \
+    --include=ca-certificates,gnupg \
+    --exclude=info,ifupdown \
+    bookworm \
+    /rootfs \
+    http://deb.debian.org/debian/
+
+# Stage0/00-configure-apt: Configure APT proxy (from 00-run.sh and files/51cache)
+RUN if [ -n "${APT_PROXY}" ]; then \
+        echo "Acquire::http { Proxy \"${APT_PROXY}\"; };" > /rootfs/etc/apt/apt.conf.d/51cache; \
+    fi
+
+# Stage0/00-configure-apt: Temporary repository configuration (from 00-run.sh)
+RUN if [ -n "${TEMP_REPO}" ]; then \
+        echo "${TEMP_REPO}" | sed "s/RELEASE/bookworm/g" > /rootfs/etc/apt/sources.list.d/00-temp.list; \
+    fi
+
+# Stage0/00-configure-apt: Install APT sources (from 00-run.sh, files/sources.list and files/raspi.list)
+# Container adaptation: Create sources inline instead of copying files and using sed "s/RELEASE/bookworm/g"
+# (pi-gen uses: install files/sources.list + sed substitution, container: echo direct content)
+RUN echo "deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware" > /rootfs/etc/apt/sources.list && \
+    echo "deb http://deb.debian.org/debian-security/ bookworm-security main contrib non-free non-free-firmware" >> /rootfs/etc/apt/sources.list && \
+    echo "deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware" >> /rootfs/etc/apt/sources.list && \
+    echo "deb http://archive.raspberrypi.com/debian/ bookworm main" > /rootfs/etc/apt/sources.list.d/raspi.list && \
+    cp raspberrypi-archive-stable.gpg /rootfs/etc/apt/trusted.gpg.d/
+
+# Stage0/00-configure-apt: Add opposite architecture and update (from 00-run.sh lines 24-33)
+# Container adaptation: Hardcoded to add armhf on arm64
+# (pi-gen uses: dynamic detection based on ARCH variable, container: static arm64 -> armhf mapping)
+RUN chroot /rootfs dpkg --add-architecture armhf && \
+    chroot /rootfs /bin/bash -c "apt-get update && apt-get dist-upgrade -y"
+
+# Stage0/00-configure-apt: Install raspberrypi-archive-keyring (from 01-packages)
+RUN chroot /rootfs /bin/bash -c "apt-get update && \
+    apt-get install -y --no-install-recommends raspberrypi-archive-keyring && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*"
+
+# Stage0/01-locale: Configure locale (from 00-debconf and 00-packages)
+RUN echo "locales locales/locales_to_be_generated multiselect ${LOCALE_DEFAULT} UTF-8" | chroot /rootfs debconf-set-selections && \
+    echo "locales locales/default_environment_locale select ${LOCALE_DEFAULT}" | chroot /rootfs debconf-set-selections && \
+    chroot /rootfs /bin/bash -c "apt-get update && \
+    apt-get install -y --no-install-recommends locales && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*"
+
+# Tiny adaptation: Skip firmware and kernel packages entirely - not needed in containers
+# Stage0/02-firmware: REMOVED - No firmware, kernel, or initramfs packages installed
+
+# =============================================================================
+# Stage 1: Basic System Configuration (pi-gen/stage1)
+# =============================================================================
+
+# Tiny adaptation: Skip boot files entirely - Docker handles container startup
+# Stage1/00-boot-files: REMOVED - No boot configuration needed in containers
+
+# Stage1/01-sys-tweaks: Create first user and set passwords (from 00-run.sh)
+RUN chroot /rootfs /bin/bash -c "if ! id -u ${FIRST_USER_NAME} >/dev/null 2>&1; then adduser --disabled-password --gecos \"\" ${FIRST_USER_NAME}; fi" && \
+    chroot /rootfs /bin/bash -c "if [ -n \"${FIRST_USER_PASS}\" ]; then echo '${FIRST_USER_NAME}:${FIRST_USER_PASS}' | chpasswd; fi" && \
+    chroot /rootfs /bin/bash -c "echo 'root:root' | chpasswd"
+
+# Stage1/01-sys-tweaks: Apply bashrc patch (from 00-patches/01-bashrc.diff)
+RUN sed -i 's/#force_color_prompt=yes/force_color_prompt=yes/' /rootfs/etc/skel/.bashrc && \
+    sed -i 's/#force_color_prompt=yes/force_color_prompt=yes/' /rootfs/root/.bashrc && \
+    sed -i 's|PS1='\''${debian_chroot:+($debian_chroot)}\\\\\\[\\\\033\\[01;32m\\\\\\]\\\\u@\\\\h\\\\\\[\\\\033\\[00m\\\\\\]:\\\\\\[\\\\033\\[01;34m\\\\\\]\\\\w\\\\\\[\\\\033\\[00m\\\\\\]\\\\$ '\''|PS1='\''${debian_chroot:+($debian_chroot)}\\\\\\[\\\\033\\[01;32m\\\\\\]\\\\u@\\\\h\\\\\\[\\\\033\\[00m\\\\\\]:\\\\\\[\\\\033\\[01;34m\\\\\\]\\\\w \\\\$\\\\\\[\\\\033\\[00m\\\\\\] '\''|' /rootfs/etc/skel/.bashrc && \
+    sed -i 's|PS1='\''${debian_chroot:+($debian_chroot)}\\\\\\[\\\\033\\[01;32m\\\\\\]\\\\u@\\\\h\\\\\\[\\\\033\\[00m\\\\\\]:\\\\\\[\\\\033\\[01;34m\\\\\\]\\\\w\\\\\\[\\\\033\\[00m\\\\\\]\\\\$ '\''|PS1='\''${debian_chroot:+($debian_chroot)}\\\\\\[\\\\033\\[01;32m\\\\\\]\\\\u@\\\\h\\\\\\[\\\\033\\[00m\\\\\\]:\\\\\\[\\\\033\\[01;34m\\\\\\]\\\\w \\\\$\\\\\\[\\\\033\\[00m\\\\\\] '\''|' /rootfs/root/.bashrc && \
+    sed -i 's/#alias grep=/alias grep=/' /rootfs/etc/skel/.bashrc && \
+    sed -i 's/#alias fgrep=/alias fgrep=/' /rootfs/etc/skel/.bashrc && \
+    sed -i 's/#alias egrep=/alias egrep=/' /rootfs/etc/skel/.bashrc && \
+    sed -i 's/#alias grep=/alias grep=/' /rootfs/root/.bashrc && \
+    sed -i 's/#alias fgrep=/alias fgrep=/' /rootfs/root/.bashrc && \
+    sed -i 's/#alias egrep=/alias egrep=/' /rootfs/root/.bashrc
+
+# Stage1/02-net-tweaks: Install netbase and configure hostname (from 00-packages and 00-run.sh)
+RUN chroot /rootfs /bin/bash -c "apt-get update && \
+    apt-get install -y --no-install-recommends netbase && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*" && \
+    echo "${TARGET_HOSTNAME}" > /rootfs/etc/hostname && \
+    echo "127.0.1.1		${TARGET_HOSTNAME}" >> /rootfs/etc/hosts
+
+# =============================================================================
+# Stage 2: Complete System Configuration (pi-gen/stage2) - Minimal Version
+# =============================================================================
+
+# Stage2/01-sys-tweaks: Configure console/keyboard debconf (from 00-debconf)
+RUN echo "console-setup console-setup/charmap47 select UTF-8" | chroot /rootfs debconf-set-selections && \
+    echo "console-setup console-setup/codeset47 select Guess optimal character set" | chroot /rootfs debconf-set-selections && \
+    echo "console-setup console-setup/fontface47 select Do not change the boot/kernel font" | chroot /rootfs debconf-set-selections && \
+    echo "keyboard-configuration keyboard-configuration/altgr select The default for the keyboard layout" | chroot /rootfs debconf-set-selections && \
+    echo "keyboard-configuration keyboard-configuration/model select Generic 105-key (Intl) PC" | chroot /rootfs debconf-set-selections && \
+    echo "keyboard-configuration keyboard-configuration/xkb-keymap select ${KEYBOARD_KEYMAP}" | chroot /rootfs debconf-set-selections && \
+    echo "keyboard-configuration keyboard-configuration/compose select No compose key" | chroot /rootfs debconf-set-selections && \
+    echo "keyboard-configuration keyboard-configuration/ctrl_alt_bksp boolean true" | chroot /rootfs debconf-set-selections && \
+    echo "keyboard-configuration keyboard-configuration/variant select ${KEYBOARD_LAYOUT}" | chroot /rootfs debconf-set-selections && \
+    echo "keyboard-configuration keyboard-configuration/optionscode string PLACEHOLDER" | chroot /rootfs debconf-set-selections
+
+# Stage2/01-sys-tweaks: Install minimal essential packages only (heavily reduced from standard version)
+# Tiny adaptation: Remove all hardware-specific packages
+# REMOVED: ssh, v4l-utils, gpiod, python3-libgpiod, python3-gpiozero, pigpio, python3-pigpio, raspi-gpio, python3-rpi-lgpio, python3-spidev, python3-smbus2, fake-hwclock, dosfstools, dphys-swapfile, raspberrypi-sys-mods, pi-bluetooth, usb-modeswitch, libpam-chksshpwd, rpi-update, libmtp-runtime, rpi-eeprom, raspi-utils, kms++-utils
+RUN chroot /rootfs /bin/bash -c "apt-get update && \
+    apt-get install -y \
+    less sudo psmisc strace ed ncdu \
+    console-setup keyboard-configuration debconf-utils \
+    build-essential manpages-dev bash-completion gdb pkg-config \
+    python-is-python3 \
+    lua5.1 \
+    luajit \
+    ca-certificates curl \
+    nfs-common usbutils \
+    apt-listchanges \
+    rsync \
+    htop \
+    man-db \
+    policykit-1 \
+    ssh-import-id \
+    ethtool \
+    ntfs-3g \
+    pciutils \
+    udisks2 \
+    unzip zip p7zip-full \
+    file \
+    python3-venv \
+    && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*"
+
+# Tiny adaptation: Skip no-recommends packages entirely
+# Stage2/01-sys-tweaks: REMOVED - rpicam-apps-lite, mkvtoolnix not needed in containers
+
+# Stage2/01-sys-tweaks: Install APT configuration (from files/50raspi)
+RUN mkdir -p /rootfs/etc/apt/apt.conf.d && \
+    echo '# never use pdiffs. Current implementation is very slow on low-powered devices' > /rootfs/etc/apt/apt.conf.d/50raspi && \
+    echo 'Acquire::PDiffs "0";' >> /rootfs/etc/apt/apt.conf.d/50raspi && \
+    echo '' >> /rootfs/etc/apt/apt.conf.d/50raspi && \
+    echo '# download up to 5 pdiffs:' >> /rootfs/etc/apt/apt.conf.d/50raspi && \
+    echo '#Acquire::PDiffs::FileLimit "5";' >> /rootfs/etc/apt/apt.conf.d/50raspi
+
+# Stage2/01-sys-tweaks: Configure console-setup (from files/console-setup)
+RUN echo '# CONFIGURATION FILE FOR SETUPCON' > /rootfs/etc/default/console-setup && \
+    echo '' >> /rootfs/etc/default/console-setup && \
+    echo '# Consult the console-setup(5) manual page.' >> /rootfs/etc/default/console-setup && \
+    echo '' >> /rootfs/etc/default/console-setup && \
+    echo 'ACTIVE_CONSOLES="/dev/tty[1-6]"' >> /rootfs/etc/default/console-setup && \
+    echo '' >> /rootfs/etc/default/console-setup && \
+    echo 'CHARMAP="UTF-8"' >> /rootfs/etc/default/console-setup && \
+    echo '' >> /rootfs/etc/default/console-setup && \
+    echo 'CODESET="guess"' >> /rootfs/etc/default/console-setup && \
+    echo 'FONTFACE=""' >> /rootfs/etc/default/console-setup && \
+    echo 'FONTSIZE=""' >> /rootfs/etc/default/console-setup && \
+    echo '' >> /rootfs/etc/default/console-setup && \
+    echo 'VIDEOMODE=' >> /rootfs/etc/default/console-setup && \
+    echo '' >> /rootfs/etc/default/console-setup && \
+    echo '# The following is an example how to use a braille font' >> /rootfs/etc/default/console-setup && \
+    echo '# FONT='\'lat9w-08.psf.gz brl-8x8.psf\''' >> /rootfs/etc/default/console-setup
+
+# Stage2/01-sys-tweaks: SSH Public Key Authentication Setup (from 01-run.sh)
+RUN if [ -n "${PUBKEY_SSH_FIRST_USER}" ]; then \
+        mkdir -p /rootfs/home/${FIRST_USER_NAME}/.ssh && \
+        echo "${PUBKEY_SSH_FIRST_USER}" > /rootfs/home/${FIRST_USER_NAME}/.ssh/authorized_keys && \
+        chown -R 1000:1000 /rootfs/home/${FIRST_USER_NAME}/.ssh && \
+        chmod 700 /rootfs/home/${FIRST_USER_NAME}/.ssh && \
+        chmod 600 /rootfs/home/${FIRST_USER_NAME}/.ssh/authorized_keys; \
+    fi
+
+# Stage2/01-sys-tweaks: SSH Public Key Only Authentication (from 01-run.sh)
+RUN if [ "${PUBKEY_ONLY_SSH}" = "1" ]; then \
+        sed -i -E 's/^#?[[:blank:]]*PubkeyAuthentication[[:blank:]]*no[[:blank:]]*$/PubkeyAuthentication yes/' /rootfs/etc/ssh/sshd_config && \
+        sed -i -E 's/^#?[[:blank:]]*PasswordAuthentication[[:blank:]]*yes[[:blank:]]*$/PasswordAuthentication no/' /rootfs/etc/ssh/sshd_config; \
+    fi
+
+# Stage2/01-sys-tweaks: Apply useradd patch (from 00-patches/01-useradd.diff)
+RUN sed -i 's|SHELL=/bin/sh|SHELL=/bin/bash|' /rootfs/etc/default/useradd && \
+    sed -i 's|#SKEL=/etc/skel|SKEL=/etc/skel|' /rootfs/etc/default/useradd
+
+# Tiny adaptation: Skip swap configuration - not relevant for containers
+# Stage2/01-sys-tweaks: REMOVED - dphys-swapfile configuration
+
+# Stage2/01-sys-tweaks: Apply inputrc patch (from 00-patches/04-inputrc.diff)
+RUN echo '' >> /rootfs/etc/inputrc && \
+    echo '# mappings for up and down arrows search history' >> /rootfs/etc/inputrc && \
+    echo '# "\e[B": history-search-forward' >> /rootfs/etc/inputrc && \
+    echo '# "\e[A": history-search-backward' >> /rootfs/etc/inputrc
+
+# Stage2/01-sys-tweaks: Apply path patch (from 00-patches/05-path.diff)
+RUN sed -i 's|PATH="/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games"|PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games"|' /rootfs/etc/login.defs && \
+    sed -i 's|PATH="/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games"|PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games"|' /rootfs/etc/profile
+
+# Tiny adaptation: Skip resize and boot configuration - not relevant for containers
+# Stage2/01-sys-tweaks: REMOVED - resize-init patch and resize2fs_once service
+
+# Stage2/01-sys-tweaks: Configure services (from 01-run.sh) - minimal version
+RUN chroot /rootfs /bin/bash -c "systemctl disable hwclock.sh || true" && \
+    chroot /rootfs /bin/bash -c "systemctl disable nfs-common || true" && \
+    chroot /rootfs /bin/bash -c "systemctl disable rpcbind || true" && \
+    chroot /rootfs /bin/bash -c "if [ \"${ENABLE_SSH}\" = \"1\" ]; then systemctl enable ssh; else systemctl disable ssh; fi" && \
+    chroot /rootfs /bin/bash -c "systemctl enable regenerate_ssh_host_keys || true"
+
+# Stage2/01-sys-tweaks: Create basic groups and add user to groups (reduced set)
+# Tiny adaptation: Remove hardware-specific groups (gpio, spi, i2c)
+RUN chroot /rootfs /bin/bash -c "for GRP in input; do groupadd -f -r \"\$GRP\"; done" && \
+    chroot /rootfs /bin/bash -c "for GRP in adm dialout cdrom audio users sudo video games plugdev input netdev render; do adduser ${FIRST_USER_NAME} \"\$GRP\"; done"
+
+# Stage2/01-sys-tweaks: Configure sudo (from 01-run.sh)
+RUN echo "${FIRST_USER_NAME} ALL=(ALL) NOPASSWD: ALL" > /rootfs/etc/sudoers.d/010_pi-nopasswd && \
+    chmod 440 /rootfs/etc/sudoers.d/010_pi-nopasswd
+
+# Stage2/01-sys-tweaks: Configure keyboard (from 01-run.sh)
+RUN sed -i "s/PLACEHOLDER//" /rootfs/etc/default/keyboard && \
+    chroot /rootfs /bin/bash -c "DEBIAN_FRONTEND=noninteractive dpkg-reconfigure keyboard-configuration"
+
+# Stage2/01-sys-tweaks: Save console configuration (from 01-run.sh line 60)
+RUN chroot /rootfs /bin/bash -c "setupcon --force --save-only -v" || true
+
+# Stage2/01-sys-tweaks: Lock root account (from 01-run.sh)
+RUN chroot /rootfs /bin/bash -c "usermod --pass='*' root"
+
+# Stage2/01-sys-tweaks: Configure systemd journald (from 01-run.sh)
+RUN sed -i 's/^#\?Storage=.*/Storage=volatile/' /rootfs/etc/systemd/journald.conf
+
+# Tiny adaptation: Skip avahi - not essential for containers
+# Stage2/01-sys-tweaks: REMOVED - avahi configuration
+
+# Stage2/01-sys-tweaks: Remove SSH host keys for security (from 01-run.sh)
+RUN rm -f /rootfs/etc/ssh/ssh_host_*_key*
+
+# Tiny adaptation: Skip all networking packages - containers handle networking differently
+# Stage2/02-net-tweaks: REMOVED - wpasupplicant, wireless-tools, firmware packages, network-manager
+
+# Tiny adaptation: Skip Mathematica configuration
+# Stage2/03-accept-mathematica-eula: REMOVED - not relevant for minimal containers
+
+# Stage2/03-set-timezone: Set timezone (from 02-run.sh)
+RUN echo "${TIMEZONE_DEFAULT}" > /rootfs/etc/timezone && \
+    rm -f /rootfs/etc/localtime && \
+    chroot /rootfs /bin/bash -c "dpkg-reconfigure -f noninteractive tzdata"
+
+# =============================================================================
+# Export Image Stage (pi-gen/export-image) - Minimal Version
+# =============================================================================
+
+# export-image/00-allow-rerun: Handle ld.so.preload (from 00-run.sh)
+RUN if [ -e /rootfs/etc/ld.so.preload ]; then \
+        mv /rootfs/etc/ld.so.preload /rootfs/etc/ld.so.preload.disabled; \
+    fi
+
+# Tiny adaptation: Skip userconf-pi - not needed for containers
+# export-image/01-user-rename: REMOVED - userconf-pi package and user rename functionality
+
+# export-image/02-set-sources: Configure final APT sources (from 01-run.sh)
+RUN if [ -f /rootfs/etc/apt/sources.list.d/00-temp.list ]; then \
+        rm -f /rootfs/etc/apt/sources.list.d/00-temp.list; \
+    fi && \
+    if [ -f /rootfs/etc/apt/apt.conf.d/51cache ]; then \
+        rm -f /rootfs/etc/apt/apt.conf.d/51cache; \
+    fi
+
+# export-image/03-network: Configure network resolution (from files/resolv.conf)
+# Container adaptation: Static DNS instead of dynamic resolution
+# (pi-gen uses: empty resolv.conf for dhcp, container: static 8.8.8.8)
+RUN echo 'nameserver 8.8.8.8' > /rootfs/etc/resolv.conf
+
+# Tiny adaptation: Skip partition UUID configuration - not relevant for containers
+# export-image/04-set-partuuid: REMOVED - PARTUUID configuration
+
+# export-image/05-finalise: Final system cleanup (minimal version)
+
+# Tiny adaptation: Skip initramfs update - no kernel packages installed
+# export-image/05-finalise: REMOVED - update-initramfs commands
+
+# Tiny adaptation: Skip fake-hwclock - no hardware clock in containers
+# export-image/05-finalise: REMOVED - fake-hwclock stop
+
+# Hardlink identical files in /usr/share/doc to save space
+RUN chroot /rootfs /bin/bash -c "hardlink -t /usr/share/doc" || true
+
+# Fix .config directory permissions if it exists
+RUN if [ -d /rootfs/home/${FIRST_USER_NAME}/.config ]; then \
+        chroot /rootfs /bin/bash -c "chown -R ${FIRST_USER_NAME}:${FIRST_USER_NAME} /home/${FIRST_USER_NAME}/.config"; \
+    fi
+
+# Remove backup files and editor leftovers
+RUN find /rootfs -type f \( \
+        -name "*.dpkg-*" -o \
+        -name "*.ucf-*" -o \
+        -name "*.merge-error" -o \
+        -name "*~" \
+    \) -delete 2>/dev/null || true && \
+    rm -rf /rootfs/var/lib/dpkg/*-old 2>/dev/null || true && \
+    rm -rf /rootfs/var/cache/debconf/*-old 2>/dev/null || true && \
+    rm -rf /rootfs/usr/share/icons/*/icon-theme.cache 2>/dev/null || true && \
+    rm -f /rootfs/etc/network/interfaces.dpkg-old 2>/dev/null || true && \
+    rm -f /rootfs/etc/apt/sources.list~ 2>/dev/null || true && \
+    rm -f /rootfs/etc/apt/trusted.gpg~ 2>/dev/null || true && \
+    rm -f /rootfs/etc/passwd- 2>/dev/null || true && \
+    rm -f /rootfs/etc/group- 2>/dev/null || true && \
+    rm -f /rootfs/etc/shadow- 2>/dev/null || true && \
+    rm -f /rootfs/etc/gshadow- 2>/dev/null || true && \
+    rm -f /rootfs/etc/subuid- 2>/dev/null || true && \
+    rm -f /rootfs/etc/subgid- 2>/dev/null || true && \
+    rm -f /rootfs/var/lib/dbus/machine-id 2>/dev/null || true && \
+    rm -f /rootfs/root/.vnc/private.key 2>/dev/null || true
+
+# Reset machine-id
+RUN rm -f /rootfs/etc/machine-id && \
+    touch /rootfs/etc/machine-id
+
+# Create /etc/mtab symlink
+RUN ln -nsf /proc/self/mounts /rootfs/etc/mtab
+
+# Truncate log files
+RUN find /rootfs/var/log -type f -exec truncate -s 0 {} \; 2>/dev/null || true
+
+# Clean VNC keys if they exist
+RUN rm -rf /rootfs/etc/vnc/updateid 2>/dev/null || true
+
+# Create rpi-issue file for system identification
+RUN echo "Raspberry Pi reference 2025-01-07 (Tiny)" > /rootfs/etc/rpi-issue && \
+    echo "Generated using pi-gen, https://github.com/RPi-Distro/pi-gen" >> /rootfs/etc/rpi-issue && \
+    echo "" >> /rootfs/etc/rpi-issue && \
+    echo "Stage: 2 (Tiny - Hardware components removed)" >> /rootfs/etc/rpi-issue
+
+# APT cleanup
+RUN chroot /rootfs /bin/bash -c "apt-get update && apt-get dist-upgrade --auto-remove --purge -y && apt-get clean" && \
+    rm -rf /rootfs/var/lib/apt/lists/* && \
+    rm -f /rootfs/etc/apt/apt.conf.d/51cache 2>/dev/null || true && \
+    rm -f /rootfs/etc/apt/sources.list.d/00-temp.list 2>/dev/null || true
+
+# Re-enable ld.so.preload after cleanup
+RUN if [ -e /rootfs/etc/ld.so.preload.disabled ]; then \
+        mv /rootfs/etc/ld.so.preload.disabled /rootfs/etc/ld.so.preload; \
+    fi
+
+# Clean up qemu-arm-static files (following original pi-gen export-image/05-finalise/01-run.sh)
+RUN rm -f /rootfs/usr/bin/qemu-arm-static
+
+# Create essential system directories
+RUN mkdir -p /rootfs/run/systemd/resolve && \
+    mkdir -p /rootfs/var/lib/systemd/linger && \
+    mkdir -p /rootfs/var/lib/systemd/coredump
+
+# Create version files for system identification
+RUN echo "Raspberry Pi OS Lite (64-bit) - Debian Bookworm (Tiny)" > /rootfs/etc/issue && \
+    echo "Raspberry Pi OS Lite (64-bit) - Debian Bookworm (Tiny)" > /rootfs/etc/issue.net && \
+    echo "VERSION_ID=\"12\"" > /rootfs/etc/os-release && \
+    echo "VERSION=\"12 (bookworm)\"" >> /rootfs/etc/os-release && \
+    echo "ID=raspbian" >> /rootfs/etc/os-release && \
+    echo "ID_LIKE=debian" >> /rootfs/etc/os-release && \
+    echo "PRETTY_NAME=\"Raspberry Pi OS Lite (64-bit) Tiny\"" >> /rootfs/etc/os-release && \
+    echo "NAME=\"Raspberry Pi OS\"" >> /rootfs/etc/os-release
+
+# Configure PATH (without Pi-specific paths)
+RUN echo 'export PATH="$PATH"' > /rootfs/etc/profile.d/raspi-path.sh && \
+    chmod +x /rootfs/etc/profile.d/raspi-path.sh
+
+# Container adaptation: Remove fstab (Docker handles filesystem mounting)
+# (pi-gen uses: fstab for boot/root partitions, container: Docker manages storage)
+RUN rm -f /rootfs/etc/fstab
+
+# Container adaptation: Remove systemd target dependencies
+# (pi-gen uses: standard systemd targets, container: minimal targets for container environment)
+RUN rm -f /rootfs/etc/systemd/system/*.wants/* && \
+    rm -f /rootfs/lib/systemd/system/multi-user.target.wants/* && \
+    rm -f /rootfs/lib/systemd/system/graphical.target.wants/* && \
+    rm -f /rootfs/lib/systemd/system/local-fs.target.wants/* && \
+    rm -f /rootfs/lib/systemd/system/sockets.target.wants/*udev* && \
+    rm -f /rootfs/lib/systemd/system/sockets.target.wants/*initctl*
+
+# Container adaptation: Mask hardware-dependent services (expanded list for tiny version)
+# (pi-gen uses: services available for hardware interaction, container: mask incompatible services)
+RUN chroot /rootfs /bin/bash -c "systemctl mask \
+    systemd-modules-load.service \
+    systemd-udevd.service \
+    systemd-networkd.service \
+    systemd-resolved.service \
+    fake-hwclock.service \
+    dphys-swapfile.service \
+    raspi-config.service \
+    bluetooth.service \
+    bluealsa.service \
+    triggerhappy.service \
+    hciuart.service \
+    rfkill.service \
+    kbd.service \
+    console-setup.service" || true
+
+# =============================================================================
+# Verification Stage - Ensure critical configurations are in place (minimal)
+# =============================================================================
+
+# Verify critical files and directories exist (reduced set for tiny version)
+RUN test -d /rootfs/home/${FIRST_USER_NAME} || (echo "ERROR: User home directory missing" && exit 1) && \
+    test -f /rootfs/etc/hostname || (echo "ERROR: hostname file missing" && exit 1) && \
+    test -f /rootfs/etc/hosts || (echo "ERROR: hosts file missing" && exit 1) && \
+    echo "Verification passed: All critical files present (Tiny version)"
+
+# =============================================================================
+# Final Stage: Create Container Image
+# =============================================================================
+FROM scratch
+
+# Copy rootfs from builder
+COPY --from=builder /rootfs /
+
+# Set container environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=en_GB.UTF-8
+ENV LC_ALL=en_GB.UTF-8
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/games:/usr/games
+
+# Set user to default user (pi)
+USER pi
+WORKDIR /home/pi
+
+# Default command
+CMD ["/bin/bash"]
