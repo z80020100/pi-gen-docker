@@ -1,6 +1,9 @@
 #!/bin/bash
 # Raspberry Pi OS Docker Build Script
 # Version: 0.1
+#
+# Based on pi-gen project: https://github.com/RPi-Distro/pi-gen
+# Licensed under BSD 3-Clause License (see LICENSE file)
 
 set -e
 

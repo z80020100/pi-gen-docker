@@ -1,4 +1,7 @@
 # Dockerfile for building Raspberry Pi OS (64-bit) Lite - Debian Bookworm (Tiny Version)
+#
+# Based on pi-gen project: https://github.com/RPi-Distro/pi-gen
+# Licensed under BSD 3-Clause License (see LICENSE file)
 # 
 # Core principles:
 # 1. Complete alignment - Consistent with pi-gen stage0 -> stage1 -> stage2 -> export-image flow

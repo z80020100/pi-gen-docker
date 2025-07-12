@@ -335,4 +335,6 @@ This is a specialized Docker build system within the larger [pi-gen project](htt
 
 ## License
 
-This project follows the same license as the main pi-gen project. See the [main repository](https://github.com/RPi-Distro/pi-gen) for license details.
+This project is licensed under the BSD 3-Clause License, the same as the original pi-gen project. See the [LICENSE](LICENSE) file for details.
+
+Based on [pi-gen](https://github.com/RPi-Distro/pi-gen) project.
