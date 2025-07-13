@@ -1,0 +1,61 @@
+name: Docker Build CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "**"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant: [tiny, standard]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build ${{ matrix.variant }} variant
+        run: |
+          if [ "${{ matrix.variant }}" = "tiny" ]; then
+            docker build --platform linux/arm64 \
+              -t raspios-aarch64-lite-bookworm:tiny \
+              -f Dockerfile.raspios-aarch64-lite-bookworm-tiny .
+          else
+            docker build --platform linux/arm64 \
+              -t raspios-aarch64-lite-bookworm:standard \
+              -f Dockerfile.raspios-aarch64-lite-bookworm-standard .
+          fi
+
+      - name: Test ${{ matrix.variant }} image
+        run: |
+          if [ "${{ matrix.variant }}" = "tiny" ]; then
+            docker run --rm raspios-aarch64-lite-bookworm:tiny uname -a
+            docker run --rm raspios-aarch64-lite-bookworm:tiny cat /etc/os-release
+          else
+            docker run --rm raspios-aarch64-lite-bookworm:standard uname -a
+            docker run --rm raspios-aarch64-lite-bookworm:standard cat /etc/os-release
+          fi
+
+      - name: Check image size
+        run: |
+          if [ "${{ matrix.variant }}" = "tiny" ]; then
+            docker images raspios-aarch64-lite-bookworm:tiny
+          else
+            docker images raspios-aarch64-lite-bookworm:standard
+          fi
