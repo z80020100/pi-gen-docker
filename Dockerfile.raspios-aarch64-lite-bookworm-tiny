@@ -335,7 +335,7 @@ RUN echo 'nameserver 8.8.8.8' > /rootfs/etc/resolv.conf
 # export-image/05-finalise: REMOVED - fake-hwclock stop
 
 # Hardlink identical files in /usr/share/doc to save space
-RUN chroot /rootfs /bin/bash -c "hardlink -t /usr/share/doc" || true
+RUN chroot /rootfs /bin/bash -c "hardlink -t /usr/share/doc"
 
 # Fix .config directory permissions if it exists
 RUN if [ -d /rootfs/home/${FIRST_USER_NAME}/.config ]; then \
@@ -348,21 +348,21 @@ RUN find /rootfs -type f \( \
         -name "*.ucf-*" -o \
         -name "*.merge-error" -o \
         -name "*~" \
-    \) -delete 2>/dev/null || true && \
-    rm -rf /rootfs/var/lib/dpkg/*-old 2>/dev/null || true && \
-    rm -rf /rootfs/var/cache/debconf/*-old 2>/dev/null || true && \
-    rm -rf /rootfs/usr/share/icons/*/icon-theme.cache 2>/dev/null || true && \
-    rm -f /rootfs/etc/network/interfaces.dpkg-old 2>/dev/null || true && \
-    rm -f /rootfs/etc/apt/sources.list~ 2>/dev/null || true && \
-    rm -f /rootfs/etc/apt/trusted.gpg~ 2>/dev/null || true && \
-    rm -f /rootfs/etc/passwd- 2>/dev/null || true && \
-    rm -f /rootfs/etc/group- 2>/dev/null || true && \
-    rm -f /rootfs/etc/shadow- 2>/dev/null || true && \
-    rm -f /rootfs/etc/gshadow- 2>/dev/null || true && \
-    rm -f /rootfs/etc/subuid- 2>/dev/null || true && \
-    rm -f /rootfs/etc/subgid- 2>/dev/null || true && \
-    rm -f /rootfs/var/lib/dbus/machine-id 2>/dev/null || true && \
-    rm -f /rootfs/root/.vnc/private.key 2>/dev/null || true
+    \) -delete 2>/dev/null && \
+    rm -rf /rootfs/var/lib/dpkg/*-old 2>/dev/null && \
+    rm -rf /rootfs/var/cache/debconf/*-old 2>/dev/null && \
+    rm -rf /rootfs/usr/share/icons/*/icon-theme.cache 2>/dev/null && \
+    rm -f /rootfs/etc/network/interfaces.dpkg-old 2>/dev/null && \
+    rm -f /rootfs/etc/apt/sources.list~ 2>/dev/null && \
+    rm -f /rootfs/etc/apt/trusted.gpg~ 2>/dev/null && \
+    rm -f /rootfs/etc/passwd- 2>/dev/null && \
+    rm -f /rootfs/etc/group- 2>/dev/null && \
+    rm -f /rootfs/etc/shadow- 2>/dev/null && \
+    rm -f /rootfs/etc/gshadow- 2>/dev/null && \
+    rm -f /rootfs/etc/subuid- 2>/dev/null && \
+    rm -f /rootfs/etc/subgid- 2>/dev/null && \
+    rm -f /rootfs/var/lib/dbus/machine-id 2>/dev/null && \
+    rm -f /rootfs/root/.vnc/private.key 2>/dev/null
 
 # Reset machine-id
 RUN rm -f /rootfs/etc/machine-id && \
@@ -372,10 +372,10 @@ RUN rm -f /rootfs/etc/machine-id && \
 RUN ln -nsf /proc/self/mounts /rootfs/etc/mtab
 
 # Truncate log files
-RUN find /rootfs/var/log -type f -exec truncate -s 0 {} \; 2>/dev/null || true
+RUN find /rootfs/var/log -type f -exec truncate -s 0 {} \; 2>/dev/null
 
 # Clean VNC keys if they exist
-RUN rm -rf /rootfs/etc/vnc/updateid 2>/dev/null || true
+RUN rm -rf /rootfs/etc/vnc/updateid 2>/dev/null
 
 # Create rpi-issue file for system identification
 RUN echo "Raspberry Pi reference 2025-01-07 (Tiny)" > /rootfs/etc/rpi-issue && \
@@ -386,8 +386,8 @@ RUN echo "Raspberry Pi reference 2025-01-07 (Tiny)" > /rootfs/etc/rpi-issue && \
 # APT cleanup
 RUN chroot /rootfs /bin/bash -c "apt-get update && apt-get dist-upgrade --auto-remove --purge -y && apt-get clean" && \
     rm -rf /rootfs/var/lib/apt/lists/* && \
-    rm -f /rootfs/etc/apt/apt.conf.d/51cache 2>/dev/null || true && \
-    rm -f /rootfs/etc/apt/sources.list.d/00-temp.list 2>/dev/null || true
+    rm -f /rootfs/etc/apt/apt.conf.d/51cache 2>/dev/null && \
+    rm -f /rootfs/etc/apt/sources.list.d/00-temp.list 2>/dev/null
 
 # Re-enable ld.so.preload after cleanup
 RUN if [ -e /rootfs/etc/ld.so.preload.disabled ]; then \
@@ -445,7 +445,7 @@ RUN chroot /rootfs /bin/bash -c "systemctl mask \
     hciuart.service \
     rfkill.service \
     kbd.service \
-    console-setup.service" || true
+    console-setup.service"
 
 # =============================================================================
 # Verification Stage - Ensure critical configurations are in place (minimal)

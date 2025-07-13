@@ -63,7 +63,7 @@ fi
 
 if [ "$CLEAN_BUILD" = true ]; then
     echo -e "${YELLOW}Cleaning existing image...${NC}"
-    docker rmi "${IMAGE_NAME}:${IMAGE_TAG}" 2>/dev/null || true
+    docker rmi "${IMAGE_NAME}:${IMAGE_TAG}" 2>/dev/null
 fi
 
 echo -e "${BLUE}Building ${IMAGE_NAME}:${IMAGE_TAG}...${NC}"

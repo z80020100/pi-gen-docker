@@ -126,7 +126,7 @@ RUN chroot /rootfs /bin/bash -c "apt-get update && \
     linux-image-rpi-2712 \
     linux-headers-rpi-v8 \
     linux-headers-rpi-2712 && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*" || true
+    apt-get clean && rm -rf /var/lib/apt/lists/*"
 
 # Stage0/02-firmware: Install raspi-firmware (from 01-packages line 2)
 # Container adaptation: Extract raspi-firmware manually to avoid /boot mount issues
@@ -135,7 +135,7 @@ RUN chroot /rootfs /bin/bash -c "apt-get update && \
     apt-get download raspi-firmware && \
     dpkg-deb -x raspi-firmware*.deb / && \
     rm raspi-firmware*.deb && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*" || true
+    apt-get clean && rm -rf /var/lib/apt/lists/*"
 
 # Stage0/02-firmware: Configure initramfs (from 02-run.sh)
 RUN if [ -f /rootfs/etc/initramfs-tools/update-initramfs.conf ]; then \
@@ -152,7 +152,7 @@ RUN if [ -f /rootfs/etc/initramfs-tools/update-initramfs.conf ]; then \
 
 # Stage1/00-boot-files: Ensure boot directory structure exists (from 00-run.sh)
 RUN mkdir -p /rootfs/boot/firmware/overlays && \
-    ln -sf /boot/firmware/overlays /rootfs/boot/overlays || true
+    ln -sf /boot/firmware/overlays /rootfs/boot/overlays
 
 # Stage1/00-boot-files: Install boot configuration files (from files/cmdline.txt)
 RUN mkdir -p /rootfs/boot/firmware && \
@@ -256,7 +256,7 @@ RUN chroot /rootfs /bin/bash -c "apt-get update && \
     echo "127.0.1.1		${TARGET_HOSTNAME}" >> /rootfs/etc/hosts
 
 # Stage1/02-net-tweaks: Configure network names (from 00-run.sh)
-RUN chroot /rootfs /bin/bash -c "SUDO_USER=${FIRST_USER_NAME} raspi-config nonint do_net_names 1" || true
+RUN chroot /rootfs /bin/bash -c "SUDO_USER=${FIRST_USER_NAME} raspi-config nonint do_net_names 1"
 
 # Stage1/03-install-packages: Install time synchronization
 RUN chroot /rootfs /bin/bash -c "apt-get update && \
@@ -459,7 +459,7 @@ RUN chroot /rootfs /bin/bash -c "usermod --pass='*' root"
 RUN sed -i 's/^#\?Storage=.*/Storage=volatile/' /rootfs/etc/systemd/journald.conf
 
 # Stage2/01-sys-tweaks: Configure avahi (from 01-run.sh)
-RUN sed -i 's/^#\?publish-workstation=.*/publish-workstation=yes/' /rootfs/etc/avahi/avahi-daemon.conf || true
+RUN sed -i 's/^#\?publish-workstation=.*/publish-workstation=yes/' /rootfs/etc/avahi/avahi-daemon.conf
 
 # Stage2/01-sys-tweaks: Remove SSH host keys for security (from 01-run.sh)
 RUN rm -f /rootfs/etc/ssh/ssh_host_*_key*
@@ -489,7 +489,7 @@ RUN mkdir -p /rootfs/var/lib/systemd/rfkill && \
 
 # Stage2/02-net-tweaks: Configure WPA country (from 01-run.sh)
 RUN if [ -n "${WPA_COUNTRY}" ]; then \
-        chroot /rootfs /bin/bash -c "raspi-config nonint do_wifi_country ${WPA_COUNTRY}" || true; \
+        chroot /rootfs /bin/bash -c "raspi-config nonint do_wifi_country ${WPA_COUNTRY}"; \
     fi
 
 # Stage2/02-net-tweaks: Configure NetworkManager to disable wireless by default (from 01-run.sh)
@@ -524,7 +524,7 @@ RUN chroot /rootfs /bin/bash -c "apt-get update && \
 # export-image/01-user-rename: Configure user rename functionality (from 01-run.sh)
 # Container adaptation: Disable first boot user rename (not needed in containers)
 # (pi-gen uses: conditional configuration, container: always disabled)
-RUN rm -f /rootfs/etc/xdg/autostart/piwiz.desktop 2>/dev/null || true
+RUN rm -f /rootfs/etc/xdg/autostart/piwiz.desktop 2>/dev/null
 
 # export-image/02-set-sources: Configure final APT sources (from 01-run.sh)
 RUN if [ -f /rootfs/etc/apt/sources.list.d/00-temp.list ]; then \
@@ -542,10 +542,10 @@ RUN echo 'nameserver 8.8.8.8' > /rootfs/etc/resolv.conf
 # export-image/04-set-partuuid: Configure partition UUIDs (from 00-run.sh)
 # Container adaptation: Use placeholder UUIDs instead of extracting from image
 # (pi-gen uses: extract from loop device, container: placeholder values)
-RUN sed -i 's|BOOTDEV|PARTUUID=00000000-01|g' /rootfs/etc/fstab 2>/dev/null || true && \
-    sed -i 's|ROOTDEV|PARTUUID=00000000-02|g' /rootfs/etc/fstab 2>/dev/null || true && \
-    sed -i 's|BOOTDEV|PARTUUID=00000000-01|g' /rootfs/boot/firmware/cmdline.txt 2>/dev/null || true && \
-    sed -i 's|ROOTDEV|PARTUUID=00000000-02|g' /rootfs/boot/firmware/cmdline.txt 2>/dev/null || true
+RUN sed -i 's|BOOTDEV|PARTUUID=00000000-01|g' /rootfs/etc/fstab 2>/dev/null && \
+    sed -i 's|ROOTDEV|PARTUUID=00000000-02|g' /rootfs/etc/fstab 2>/dev/null && \
+    sed -i 's|BOOTDEV|PARTUUID=00000000-01|g' /rootfs/boot/firmware/cmdline.txt 2>/dev/null && \
+    sed -i 's|ROOTDEV|PARTUUID=00000000-02|g' /rootfs/boot/firmware/cmdline.txt 2>/dev/null
 
 # export-image/05-finalise: Final system cleanup (from 01-run.sh)
 
@@ -556,7 +556,7 @@ RUN chroot /rootfs /bin/bash -c "update-initramfs -k all -c" || true
 RUN chroot /rootfs /bin/bash -c "fake-hwclock stop" || true
 
 # Hardlink identical files in /usr/share/doc to save space
-RUN chroot /rootfs /bin/bash -c "hardlink -t /usr/share/doc" || true
+RUN chroot /rootfs /bin/bash -c "hardlink -t /usr/share/doc"
 
 # Configure update-initramfs
 RUN if [ -e /rootfs/etc/initramfs-tools/update-initramfs.conf ]; then \
@@ -577,21 +577,21 @@ RUN find /rootfs -type f \( \
         -name "*.ucf-*" -o \
         -name "*.merge-error" -o \
         -name "*~" \
-    \) -delete 2>/dev/null || true && \
-    rm -rf /rootfs/var/lib/dpkg/*-old 2>/dev/null || true && \
-    rm -rf /rootfs/var/cache/debconf/*-old 2>/dev/null || true && \
-    rm -rf /rootfs/usr/share/icons/*/icon-theme.cache 2>/dev/null || true && \
-    rm -f /rootfs/etc/network/interfaces.dpkg-old 2>/dev/null || true && \
-    rm -f /rootfs/etc/apt/sources.list~ 2>/dev/null || true && \
-    rm -f /rootfs/etc/apt/trusted.gpg~ 2>/dev/null || true && \
-    rm -f /rootfs/etc/passwd- 2>/dev/null || true && \
-    rm -f /rootfs/etc/group- 2>/dev/null || true && \
-    rm -f /rootfs/etc/shadow- 2>/dev/null || true && \
-    rm -f /rootfs/etc/gshadow- 2>/dev/null || true && \
-    rm -f /rootfs/etc/subuid- 2>/dev/null || true && \
-    rm -f /rootfs/etc/subgid- 2>/dev/null || true && \
-    rm -f /rootfs/var/lib/dbus/machine-id 2>/dev/null || true && \
-    rm -f /rootfs/root/.vnc/private.key 2>/dev/null || true
+    \) -delete 2>/dev/null && \
+    rm -rf /rootfs/var/lib/dpkg/*-old 2>/dev/null && \
+    rm -rf /rootfs/var/cache/debconf/*-old 2>/dev/null && \
+    rm -rf /rootfs/usr/share/icons/*/icon-theme.cache 2>/dev/null && \
+    rm -f /rootfs/etc/network/interfaces.dpkg-old 2>/dev/null && \
+    rm -f /rootfs/etc/apt/sources.list~ 2>/dev/null && \
+    rm -f /rootfs/etc/apt/trusted.gpg~ 2>/dev/null && \
+    rm -f /rootfs/etc/passwd- 2>/dev/null && \
+    rm -f /rootfs/etc/group- 2>/dev/null && \
+    rm -f /rootfs/etc/shadow- 2>/dev/null && \
+    rm -f /rootfs/etc/gshadow- 2>/dev/null && \
+    rm -f /rootfs/etc/subuid- 2>/dev/null && \
+    rm -f /rootfs/etc/subgid- 2>/dev/null && \
+    rm -f /rootfs/var/lib/dbus/machine-id 2>/dev/null && \
+    rm -f /rootfs/root/.vnc/private.key 2>/dev/null
 
 # Reset machine-id
 RUN rm -f /rootfs/etc/machine-id && \
@@ -601,10 +601,10 @@ RUN rm -f /rootfs/etc/machine-id && \
 RUN ln -nsf /proc/self/mounts /rootfs/etc/mtab
 
 # Truncate log files
-RUN find /rootfs/var/log -type f -exec truncate -s 0 {} \; 2>/dev/null || true
+RUN find /rootfs/var/log -type f -exec truncate -s 0 {} \; 2>/dev/null
 
 # Clean VNC keys if they exist
-RUN rm -rf /rootfs/etc/vnc/updateid 2>/dev/null || true
+RUN rm -rf /rootfs/etc/vnc/updateid 2>/dev/null
 
 # Create rpi-issue file for system identification
 RUN echo "Raspberry Pi reference 2025-01-07" > /rootfs/etc/rpi-issue && \
@@ -620,8 +620,8 @@ RUN echo "Raspberry Pi reference 2025-01-07" > /rootfs/etc/rpi-issue && \
 # APT cleanup
 RUN chroot /rootfs /bin/bash -c "apt-get update && apt-get dist-upgrade --auto-remove --purge -y && apt-get clean" && \
     rm -rf /rootfs/var/lib/apt/lists/* && \
-    rm -f /rootfs/etc/apt/apt.conf.d/51cache 2>/dev/null || true && \
-    rm -f /rootfs/etc/apt/sources.list.d/00-temp.list 2>/dev/null || true
+    rm -f /rootfs/etc/apt/apt.conf.d/51cache 2>/dev/null && \
+    rm -f /rootfs/etc/apt/sources.list.d/00-temp.list 2>/dev/null
 
 # Re-enable ld.so.preload after cleanup
 RUN if [ -e /rootfs/etc/ld.so.preload.disabled ]; then \
@@ -677,7 +677,7 @@ RUN chroot /rootfs /bin/bash -c "systemctl mask \
     systemd-resolved.service \
     fake-hwclock.service \
     dphys-swapfile.service \
-    raspi-config.service" || true
+    raspi-config.service"
 
 # =============================================================================
 # Verification Stage - Ensure critical configurations are in place
