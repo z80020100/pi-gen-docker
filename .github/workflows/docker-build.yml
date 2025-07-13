@@ -2,7 +2,7 @@ name: Docker Build CI
 
 on:
   push:
-    branches: [main, ci/docker-builds]
+    branches: [main]
     paths:
       - "**"
   pull_request:
