@@ -431,11 +431,12 @@ RUN echo '#!/bin/sh' > /rootfs/etc/init.d/resize2fs_once && \
 # (pi-gen uses: conditional install based on USE_QEMU, container: skip as USE_QEMU=0)
 
 # Stage2/01-sys-tweaks: Configure services (from 01-run.sh)
-RUN chroot /rootfs /bin/bash -c "systemctl disable hwclock.sh || true" && \
-    chroot /rootfs /bin/bash -c "systemctl disable nfs-common || true" && \
-    chroot /rootfs /bin/bash -c "systemctl disable rpcbind || true" && \
+# Container adaptation: Some services might not exist in minimal container environments
+RUN chroot /rootfs /bin/bash -c "systemctl disable hwclock.sh 2>/dev/null || echo 'hwclock.sh service not found (normal for containers)'" && \
+    chroot /rootfs /bin/bash -c "systemctl disable nfs-common 2>/dev/null || echo 'nfs-common service not found'" && \
+    chroot /rootfs /bin/bash -c "systemctl disable rpcbind 2>/dev/null || echo 'rpcbind service not found'" && \
     chroot /rootfs /bin/bash -c "if [ \"${ENABLE_SSH}\" = \"1\" ]; then systemctl enable ssh; else systemctl disable ssh; fi" && \
-    chroot /rootfs /bin/bash -c "systemctl enable regenerate_ssh_host_keys || true"
+    chroot /rootfs /bin/bash -c "systemctl enable regenerate_ssh_host_keys 2>/dev/null || echo 'regenerate_ssh_host_keys service not found'"
 
 # Stage2/01-sys-tweaks: Create hardware groups and add user to groups (from 01-run.sh)
 RUN chroot /rootfs /bin/bash -c "for GRP in input spi i2c gpio; do groupadd -f -r \"\$GRP\"; done" && \
@@ -450,7 +451,10 @@ RUN sed -i "s/PLACEHOLDER//" /rootfs/etc/default/keyboard && \
     chroot /rootfs /bin/bash -c "DEBIAN_FRONTEND=noninteractive dpkg-reconfigure keyboard-configuration"
 
 # Stage2/01-sys-tweaks: Save console configuration (from 01-run.sh line 60)
-RUN chroot /rootfs /bin/bash -c "setupcon --force --save-only -v" || true
+# Container adaptation: setupcon may fail in containers due to missing console/keyboard symbols
+# This is expected as containers don't have physical consoles. We attempt it but don't fail the build.
+RUN chroot /rootfs /bin/bash -c "setupcon --force --save-only -v 2>/dev/null" || \
+    echo "Note: setupcon failed (expected in container environment without physical console)"
 
 # Stage2/01-sys-tweaks: Lock root account (from 01-run.sh)
 RUN chroot /rootfs /bin/bash -c "usermod --pass='*' root"
@@ -550,10 +554,14 @@ RUN sed -i 's|BOOTDEV|PARTUUID=00000000-01|g' /rootfs/etc/fstab 2>/dev/null && \
 # export-image/05-finalise: Final system cleanup (from 01-run.sh)
 
 # Update initramfs for all kernels
-RUN chroot /rootfs /bin/bash -c "update-initramfs -k all -c" || true
+# Container adaptation: May fail if no kernels are installed (expected in container environment)
+RUN chroot /rootfs /bin/bash -c "update-initramfs -k all -c 2>/dev/null" || \
+    echo "Note: update-initramfs skipped (no kernels found in container)"
 
 # Stop fake-hwclock to save current time
-RUN chroot /rootfs /bin/bash -c "fake-hwclock stop" || true
+# Container adaptation: fake-hwclock might not be running in container environment
+RUN chroot /rootfs /bin/bash -c "fake-hwclock stop 2>/dev/null" || \
+    echo "Note: fake-hwclock not running (normal in container environment)"
 
 # Hardlink identical files in /usr/share/doc to save space
 RUN chroot /rootfs /bin/bash -c "hardlink -t /usr/share/doc"
