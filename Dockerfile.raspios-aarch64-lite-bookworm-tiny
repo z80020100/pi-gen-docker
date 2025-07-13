@@ -253,11 +253,12 @@ RUN sed -i 's|PATH="/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games"|PA
 # Stage2/01-sys-tweaks: REMOVED - resize-init patch and resize2fs_once service
 
 # Stage2/01-sys-tweaks: Configure services (from 01-run.sh) - minimal version
-RUN chroot /rootfs /bin/bash -c "systemctl disable hwclock.sh || true" && \
-    chroot /rootfs /bin/bash -c "systemctl disable nfs-common || true" && \
-    chroot /rootfs /bin/bash -c "systemctl disable rpcbind || true" && \
+# Container adaptation: Some services might not exist in minimal container environments
+RUN chroot /rootfs /bin/bash -c "systemctl disable hwclock.sh 2>/dev/null || echo 'hwclock.sh service not found (normal for containers)'" && \
+    chroot /rootfs /bin/bash -c "systemctl disable nfs-common 2>/dev/null || echo 'nfs-common service not found'" && \
+    chroot /rootfs /bin/bash -c "systemctl disable rpcbind 2>/dev/null || echo 'rpcbind service not found'" && \
     chroot /rootfs /bin/bash -c "if [ \"${ENABLE_SSH}\" = \"1\" ]; then systemctl enable ssh; else systemctl disable ssh; fi" && \
-    chroot /rootfs /bin/bash -c "systemctl enable regenerate_ssh_host_keys || true"
+    chroot /rootfs /bin/bash -c "systemctl enable regenerate_ssh_host_keys 2>/dev/null || echo 'regenerate_ssh_host_keys service not found'"
 
 # Stage2/01-sys-tweaks: Create basic groups and add user to groups (reduced set)
 # Tiny adaptation: Remove hardware-specific groups (gpio, spi, i2c)
@@ -273,7 +274,10 @@ RUN sed -i "s/PLACEHOLDER//" /rootfs/etc/default/keyboard && \
     chroot /rootfs /bin/bash -c "DEBIAN_FRONTEND=noninteractive dpkg-reconfigure keyboard-configuration"
 
 # Stage2/01-sys-tweaks: Save console configuration (from 01-run.sh line 60)
-RUN chroot /rootfs /bin/bash -c "setupcon --force --save-only -v" || true
+# Container adaptation: setupcon may fail in containers due to missing console/keyboard symbols
+# This is expected as containers don't have physical consoles. We attempt it but don't fail the build.
+RUN chroot /rootfs /bin/bash -c "setupcon --force --save-only -v 2>/dev/null" || \
+    echo "Note: setupcon failed (expected in container environment without physical console)"
 
 # Stage2/01-sys-tweaks: Lock root account (from 01-run.sh)
 RUN chroot /rootfs /bin/bash -c "usermod --pass='*' root"
